@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IMTalker Fullscreen — Binary WS</title>
+  <meta name="description" content="Real-time talking head avatar powered by Moshi Helium speech-to-speech and SoulX-FlashHead video generation." />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #06080f;
+      --surface: #0e1220;
+      --surface2: #151b2e;
+      --surface3: #1c2440;
+      --border: #252d50;
+      --border-glow: rgba(99, 102, 241, 0.25);
+      --text: #e2e8f0;
+      --muted: #8492b4;
+      --accent: #6366f1;
+      --accent2: #818cf8;
+      --accent3: #a5b4fc;
+      --cyan: #06b6d4;
+      --cyan2: #22d3ee;
+      --ok: #10b981;
+      --ok2: #34d399;
+      --warn: #f59e0b;
+      --err: #ef4444;
+      --radius: 16px;
+      --radius-sm: 10px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; overflow-x: hidden;
+    }
+    body::before, body::after {
+      content: ''; position: fixed; border-radius: 50%;
+      filter: blur(140px); opacity: 0.12; z-index: 0; pointer-events: none;
+    }
+    body::before { width: 700px; height: 700px; background: radial-gradient(circle, #6366f1, #4f46e5); top: -250px; left: -150px; }
+    body::after { width: 600px; height: 600px; background: radial-gradient(circle, #06b6d4, #0891b2); bottom: -200px; right: -100px; }
+    .container { width: 100vw; min-height: 100vh; margin: 0; padding: 0; position: relative; z-index: 1; }
+
+    /* Header */
+    .header { position: fixed; top: 12px; left: 12px; right: 12px; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 0; flex-wrap: wrap; pointer-events: none; }
+    .header > * { pointer-events: auto; }
+    .header-left { display: none; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 8px 12px; backdrop-filter: blur(10px); }
+    .header-left h1 {
+      font-size: 1.0rem; font-weight: 800; letter-spacing: 0;
+      background: linear-gradient(135deg, var(--accent2), var(--cyan));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .header-left p { display: none; }
+    .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 8px; backdrop-filter: blur(10px); }
+    button {
+      border: none; border-radius: var(--radius-sm); padding: 8px 14px;
+      font-family: inherit; font-weight: 600; font-size: 0.88rem;
+      cursor: pointer; transition: all 0.2s ease; position: relative; overflow: hidden;
+    }
+    button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    button:active { transform: translateY(0); }
+    button:disabled { opacity: 0.35; cursor: default; transform: none; box-shadow: none; }
+    .btn-start { background: linear-gradient(135deg, var(--ok), #059669); color: #fff; }
+    .btn-stop { background: linear-gradient(135deg, var(--err), #dc2626); color: #fff; }
+    .btn-reconnect { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    #statusPill {
+      font-size: 0.8rem; font-weight: 500; padding: 6px 16px; border-radius: 999px;
+      background: var(--surface2); border: 1px solid var(--border); color: var(--muted); transition: all 0.3s;
+    }
+
+    /* Main Grid */
+    .main-grid { display: block; width: 100vw; height: 100vh; }
+    @media (max-width: 960px) { .main-grid { display: block; } }
+
+    /* Video Panel */
+    .video-panel { position: fixed; inset: 0; background: #000; border: 0; border-radius: 0; overflow: hidden; box-shadow: none; }
+    .video-shell { position: absolute; inset: 0; width: 100vw; height: 100vh; aspect-ratio: auto; background: #000; display: flex; align-items: center; justify-content: center; }
+    #videoCanvas {
+      width: min(100vw, calc(100vh * 395 / 512));
+      height: min(100vh, calc(100vw * 512 / 395));
+      aspect-ratio: 395 / 512;
+      display: block;
+      background: #000;
+    }
+    .overlay-badge {
+      display: none;
+      position: absolute; left: 16px; bottom: 16px; top: auto;
+      background: rgba(0,0,0,0.65); backdrop-filter: blur(12px);
+      color: #fff; font-size: 0.76rem; font-weight: 600; padding: 5px 14px;
+      border-radius: 999px; display: flex; align-items: center; gap: 7px;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--err); transition: background 0.3s; }
+    .live-dot.active { background: var(--ok); animation: pulse 1.5s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
+      50% { opacity: 0.7; box-shadow: 0 0 0 6px rgba(16,185,129,0); }
+    }
+    .buffer-overlay {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+      opacity: 0; pointer-events: none; transition: opacity 0.3s;
+    }
+    .buffer-overlay.visible { opacity: 1; pointer-events: auto; }
+    .buffer-spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent2); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .buffer-label { font-size: 0.85rem; color: var(--muted); font-weight: 500; }
+    .meter-bar { display: none; position: fixed; left: 16px; right: 16px; bottom: 58px; z-index: 9; padding: 8px 12px; display: flex; align-items: center; gap: 10px; border: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.45); border-radius: 10px; backdrop-filter: blur(10px); }
+    .meter-label { font-size: 0.75rem; color: var(--muted); white-space: nowrap; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+    .meter-track { flex: 1; height: 5px; background: var(--surface2); border-radius: 999px; overflow: hidden; }
+    .meter-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--ok), var(--ok2)); transition: width 60ms linear; border-radius: 999px; }
+
+    /* Stats Panel */
+    .stats-panel { display: none; position: fixed; right: 12px; top: 78px; width: 340px; max-height: calc(100vh - 96px); overflow-y: auto; z-index: 9; background: rgba(14,18,32,0.78); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 12px; backdrop-filter: blur(12px); }
+    .stats-panel h3 {
+      font-size: 0.95rem; font-weight: 700; margin-bottom: 14px;
+      background: linear-gradient(135deg, var(--accent3), var(--cyan2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .stat-card { background: rgba(21,27,46,0.82); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 7px 9px; transition: border-color 0.2s; }
+    .stat-card:hover { border-color: var(--border-glow); }
+    .stat-label { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; margin-bottom: 3px; }
+    .stat-value { font-size: 1rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+
+    /* A/V Sync */
+    .sync-section { margin-top: 14px; padding: 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+    .sync-section h4 { font-size: 0.78rem; color: var(--muted); font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .sync-bar-track { height: 6px; background: var(--surface3); border-radius: 999px; overflow: hidden; position: relative; }
+    .sync-bar-center { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; transform: translateX(-1px); background: rgba(255,255,255,0.15); }
+    .sync-bar-fill { height: 100%; background: var(--ok); width: 50%; transition: width 200ms ease, background-color 200ms ease; border-radius: 999px; }
+    .sync-labels { display: flex; justify-content: space-between; font-size: 0.68rem; color: var(--muted); margin-top: 4px; }
+    .sync-labels .center { font-weight: 600; color: var(--ok); transition: color 0.2s; }
+
+    /* Sync gap stats row */
+    .sync-gap-row { display: flex; gap: 12px; margin-top: 8px; }
+    .sync-gap-item { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; text-align: center; }
+    .sync-gap-item .label { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+    .sync-gap-item .value { font-size: 0.82rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .sync-gap-item .value.positive { color: var(--ok); }
+    .sync-gap-item .value.negative { color: var(--warn); }
+    .sync-gap-item .value.zero { color: var(--text); }
+
+    /* Moshi Text */
+    .text-section { margin-top: 14px; }
+    .text-section h4 { font-size: 0.78rem; color: var(--muted); font-weight: 600; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .text-content {
+      background: rgba(6,8,15,0.82); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+      padding: 10px; min-height: 56px; max-height: 110px; overflow-y: auto;
+      font-size: 0.85rem; color: var(--text); line-height: 1.5; word-break: break-word;
+    }
+    .text-content::-webkit-scrollbar { width: 4px; }
+    .text-content::-webkit-scrollbar-track { background: transparent; }
+    .text-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .text-content .cursor { display: inline-block; width: 2px; height: 1em; background: var(--accent2); animation: blink 1s step-end infinite; vertical-align: text-bottom; margin-left: 2px; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+    /* Clean fullscreen mode: keep only video + conversation controls. */
+    .stats-panel, .meter-bar, .overlay-badge, .header-left { display: none !important; }
+    .header { justify-content: flex-end; }
+    .controls { opacity: 0.82; }
+    .controls:hover { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-left">
+        <h1 id="pageTitle">IMTalker Fullscreen</h1>
+        <p>Moshi Helium S2S + SoulX-FlashHead Visual Avatar</p>
+      </div>
+      <div class="controls">
+        <button id="startBtn" class="btn-start">Start Conversation</button>
+        <button id="stopBtn" class="btn-stop" disabled>Stop</button>
+        <button id="reconnectBtn" class="btn-reconnect">Reconnect</button>
+        <span id="statusPill">Idle</span>
+      </div>
+    </div>
+    <div class="main-grid">
+      <div class="video-panel">
+        <div class="video-shell">
+          <canvas id="videoCanvas" width="512" height="512" aria-label="Avatar"></canvas>
+          <div class="overlay-badge">
+            <div class="live-dot" id="liveDot"></div>
+            <span id="overlayText">OFFLINE</span>
+          </div>
+          <div class="buffer-overlay" id="bufferOverlay">
+            <div class="buffer-spinner"></div>
+            <div class="buffer-label" id="bufferLabel">Buffering...</div>
+          </div>
+        </div>
+        <div class="meter-bar">
+          <span class="meter-label">Mic</span>
+          <div class="meter-track"><div class="meter-fill" id="meterFill"></div></div>
+        </div>
+      </div>
+      <div class="stats-panel">
+        <h3>Pipeline Telemetry</h3>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-label" title="Measured: canvas frames drawn per wall-clock second (decode + draw loop).">Render FPS</div><div class="stat-value" id="sFps">0.0</div></div>
+          <div class="stat-card"><div class="stat-label" title="Nominal stream rate from server (JSON server_fps or server_ready.target_fps). Not measured throughput.">Target FPS</div><div class="stat-value" id="sServerFps">—</div></div>
+          <div class="stat-card"><div class="stat-label">Chunk Gen</div><div class="stat-value" id="sGenMs">0 ms</div></div>
+          <div class="stat-card"><div class="stat-label">Avg Gen</div><div class="stat-value" id="sAvgGenMs">0 ms</div></div>
+          <div class="stat-card"><div class="stat-label">Chunks Done</div><div class="stat-value" id="sChunks">0</div></div>
+          <div class="stat-card"><div class="stat-label">Model Type</div><div class="stat-value" id="sModel">—</div></div>
+          <div class="stat-card"><div class="stat-label">Audio Lead</div><div class="stat-value" id="sAudioLead">0 ms</div></div>
+          <div class="stat-card"><div class="stat-label">Frame Buffer</div><div class="stat-value" id="sFrameBuf">0</div></div>
+          <div class="stat-card"><div class="stat-label">Session</div><div class="stat-value" id="sSession">0.0 s</div></div>
+          <div class="stat-card"><div class="stat-label">Buffer Delay</div><div class="stat-value" id="sBufferDelay">0 ms</div></div>
+        </div>
+        <div class="sync-section">
+          <h4>A/V Synchronization</h4>
+          <div class="sync-bar-track">
+            <div class="sync-bar-center"></div>
+            <div class="sync-bar-fill" id="syncFill"></div>
+          </div>
+          <div class="sync-labels">
+            <span>Audio Ahead</span>
+            <span class="center" id="syncLabel">In Sync</span>
+            <span>Video Ahead</span>
+          </div>
+          <div class="sync-gap-row">
+            <div class="sync-gap-item">
+              <div class="label">1st Token Gap</div>
+              <div class="value zero" id="syncFirstGap">0 ms</div>
+            </div>
+            <div class="sync-gap-item">
+              <div class="label">Last Token Gap</div>
+              <div class="value zero" id="syncLastGap">0 ms</div>
+            </div>
+          </div>
+        </div>
+        <div class="text-section">
+          <h4>Moshi Generated Text</h4>
+          <div class="text-content" id="moshiText">—<span class="cursor"></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ═══════════════════════════════════════════════════════════════════
+    //  IMTalker v3 Client — A/V Synchronized Playback
+    // ═══════════════════════════════════════════════════════════════════
+
+    let ws = null, mediaStream = null, audioCtx = null, scriptNode = null;
+    let micSource = null, analyser = null, meterTimer = null;
+    let playbackCursor = 0, playbackStartTime = 0, serverSR = 24000, audioStarted = false;
+    let frameStore = new Map(), frameLoopHandle = null, frameCounter = 0, frameT0 = 0, sessionT0 = 0;
+    let lastRenderedFrame = -1, highestFrameReceived = -1;
+    let modelType = "—", tokensPerChunk = 0, bufferMs = 1400;
+    let minStartFrames = 1, minResumeFrames = 1, allowMidstreamRebuffer = true;
+    let buffering = true, bufferStartTime = 0;
+    let lastAudioChunkId = -1, lastVideoChunkId = -1;
+    let moshiTranscript = "";
+    let targetFps = 25;
+
+    const $ = id => document.getElementById(id);
+    const startBtn = $("startBtn"), stopBtn = $("stopBtn"), reconnectBtn = $("reconnectBtn");
+    const statusPill = $("statusPill"), videoCanvas = $("videoCanvas");
+    const videoCtx = videoCanvas.getContext("2d", { alpha: false });
+    const overlayText = $("overlayText"), liveDot = $("liveDot");
+    const meterFill = $("meterFill"), bufferOverlay = $("bufferOverlay"), bufferLabel = $("bufferLabel");
+    const sFps = $("sFps"), sServerFps = $("sServerFps"), sGenMs = $("sGenMs");
+    const sAvgGenMs = $("sAvgGenMs"), sChunks = $("sChunks"), sModel = $("sModel");
+    const sAudioLead = $("sAudioLead"), sFrameBuf = $("sFrameBuf");
+    const sSession = $("sSession"), sBufferDelay = $("sBufferDelay");
+    const syncFill = $("syncFill"), syncLabel = $("syncLabel");
+    const syncFirstGap = $("syncFirstGap"), syncLastGap = $("syncLastGap");
+    const moshiText = $("moshiText");
+
+    function setStatus(t) { statusPill.textContent = t; }
+    document.addEventListener("keydown", (e) => {
+      if (e.key.toLowerCase() === "h") {
+        const p = document.querySelector(".stats-panel");
+        if (p) p.style.display = (p.style.display === "none") ? "block" : "none";
+      }
+    });
+    function wsUrl() { return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/conversation`; }
+
+    function b64ToBytes(b64) {
+      const bin = atob(b64), out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+    function int16ToFloat32(buf) {
+      const out = new Float32Array(buf.length);
+      for (let i = 0; i < buf.length; i++) out[i] = buf[i] / 32768;
+      return out;
+    }
+
+    function bytesToBlob(bytes, mime) {
+      return new Blob([bytes], { type: mime });
+    }
+
+    function loadImageFromBlob(blob) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+        img.onerror = (err) => { URL.revokeObjectURL(url); reject(err); };
+        img.src = url;
+      });
+    }
+
+    async function decodeFrameBitmap(jpegB64) {
+      const bytes = b64ToBytes(jpegB64);
+      const blob = bytesToBlob(bytes, "image/jpeg");
+      if ("createImageBitmap" in window) return await createImageBitmap(blob);
+      return await loadImageFromBlob(blob);
+    }
+
+    async function decodeFrameFromJpegBytes(jpegU8) {
+      const blob = bytesToBlob(jpegU8, "image/jpeg");
+      if ("createImageBitmap" in window) return await createImageBitmap(blob);
+      return await loadImageFromBlob(blob);
+    }
+
+    function resizeCanvasToViewport() {
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const rect = videoCanvas.getBoundingClientRect();
+      const targetW = Math.max(1, Math.round(rect.width * dpr));
+      const targetH = Math.max(1, Math.round(rect.height * dpr));
+      if (videoCanvas.width !== targetW || videoCanvas.height !== targetH) {
+        videoCanvas.width = targetW;
+        videoCanvas.height = targetH;
+      }
+    }
+
+    function drawFrameBitmap(bitmap) {
+      resizeCanvasToViewport();
+      const w = videoCanvas.width;
+      const h = videoCanvas.height;
+      videoCtx.clearRect(0, 0, w, h);
+      videoCtx.save();
+      // Rotate streamed frames 90 degrees clockwise, then fit the full face in frame.
+      videoCtx.translate(w, 0);
+      videoCtx.rotate(Math.PI / 2);
+      const rotatedW = h;
+      const rotatedH = w;
+      const scale = Math.min(rotatedW / bitmap.width, rotatedH / bitmap.height);
+      const dw = bitmap.width * scale;
+      const dh = bitmap.height * scale;
+      const dx = (rotatedW - dw) * 0.5;
+      const dy = (rotatedH - dh) * 0.5;
+      videoCtx.drawImage(bitmap, dx, dy, dw, dh);
+      videoCtx.restore();
+    }
+    window.addEventListener("resize", resizeCanvasToViewport);
+
+    function computeBufferTargets() {
+      if (modelType.includes("moshi_reply")) {
+        minStartFrames = Math.max(2, Math.floor(tokensPerChunk / 2));
+        minResumeFrames = 1;
+        allowMidstreamRebuffer = false;
+      } else {
+        minStartFrames = 1;
+        minResumeFrames = 1;
+        allowMidstreamRebuffer = true;
+      }
+    }
+
+    // Audio playback
+    function scheduleAudio(pcmB64, sampleRate) {
+      if (!audioCtx) return;
+      const bytes = b64ToBytes(pcmB64);
+      const i16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
+      const f32 = int16ToFloat32(i16);
+      const buf = audioCtx.createBuffer(1, f32.length, sampleRate);
+      buf.getChannelData(0).set(f32);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf; src.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
+      if (!audioStarted) {
+        playbackCursor = now + (bufferMs / 1000) + 0.05;
+        playbackStartTime = playbackCursor;
+        audioStarted = true;
+      }
+      if (playbackCursor < now + 0.02) playbackCursor = now + 0.02;
+      src.start(playbackCursor);
+      playbackCursor += buf.duration;
+    }
+
+    function scheduleAudioFromPcm16(pcmU8, sampleRate) {
+      if (!audioCtx) return;
+      const pcmCopy = pcmU8.slice();
+      const i16 = new Int16Array(pcmCopy.buffer, 0, pcmCopy.byteLength / 2);
+      const f32 = int16ToFloat32(i16);
+      const buf = audioCtx.createBuffer(1, f32.length, sampleRate);
+      buf.getChannelData(0).set(f32);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf; src.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
+      if (!audioStarted) {
+        playbackCursor = now + (bufferMs / 1000) + 0.05;
+        playbackStartTime = playbackCursor;
+        audioStarted = true;
+      }
+      if (playbackCursor < now + 0.02) playbackCursor = now + 0.02;
+      src.start(playbackCursor);
+      playbackCursor += buf.duration;
+    }
+
+    const BIN_HDR = 44;
+    async function handleBinaryAv(u8) {
+      if (u8.byteLength < BIN_HDR) return;
+      const magic = String.fromCharCode(u8[0], u8[1], u8[2], u8[3]);
+      if (magic !== "AV01") return;
+      const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+      const version = dv.getUint32(4, true);
+      if (version !== 1) return;
+      const frameNumber = dv.getUint32(8, true);
+      const chunkId = dv.getUint32(12, true);
+      const genMs = dv.getUint32(16, true);
+      const sampleRate = dv.getUint32(20, true);
+      const jpegLen = dv.getUint32(24, true);
+      const pcmLen = dv.getUint32(28, true);
+      const textLen = dv.getUint32(32, true);
+      const chunksDone = dv.getUint32(36, true);
+      let o = BIN_HDR;
+      if (o + jpegLen + pcmLen + textLen > u8.byteLength) return;
+      const jpegU8 = u8.subarray(o, o + jpegLen); o += jpegLen;
+      const pcmU8 = u8.subarray(o, o + pcmLen); o += pcmLen;
+      const textDec = textLen ? new TextDecoder().decode(u8.subarray(o, o + textLen)) : "";
+      o += textLen;
+
+      scheduleAudioFromPcm16(pcmU8, sampleRate);
+      lastAudioChunkId = chunkId;
+      sGenMs.textContent = `${genMs} ms`;
+
+      const frameIdx = Math.max(0, frameNumber);
+      highestFrameReceived = Math.max(highestFrameReceived, frameIdx);
+      if (!frameStore.has(frameIdx)) {
+        const bitmap = await decodeFrameFromJpegBytes(jpegU8);
+        frameStore.set(frameIdx, { bitmap, chunkId });
+      }
+      sServerFps.textContent = String(targetFps);
+      sChunks.textContent = String(chunksDone);
+      if (textDec.trim()) updateMoshiText(textDec.trim());
+    }
+
+    // Frame display
+    function startFrameLoop() {
+      if (frameLoopHandle) return;
+      const render = () => {
+        if (buffering) {
+          const elapsed = performance.now() - bufferStartTime;
+          if (elapsed < bufferMs || frameStore.size < minStartFrames || !audioStarted) {
+            const waitMs = Math.max(0, Math.round(bufferMs - elapsed));
+            bufferLabel.textContent = `Buffering... ${frameStore.size}/${minStartFrames} frames${waitMs > 0 ? ` • ${waitMs}ms` : ''}`;
+            sFrameBuf.textContent = String(frameStore.size);
+            frameLoopHandle = requestAnimationFrame(render);
+            return;
+          }
+          buffering = false;
+          bufferOverlay.classList.remove("visible");
+        }
+        if (!audioStarted) {
+          frameLoopHandle = requestAnimationFrame(render);
+          return;
+        }
+        if (allowMidstreamRebuffer && frameStore.size < minResumeFrames && highestFrameReceived > lastRenderedFrame) {
+          buffering = true;
+          bufferStartTime = performance.now();
+          bufferOverlay.classList.add("visible");
+          frameLoopHandle = requestAnimationFrame(render);
+          return;
+        }
+
+        const audioElapsed = Math.max(0, audioCtx.currentTime - playbackStartTime);
+        const targetFrame = Math.max(0, Math.floor(audioElapsed * targetFps));
+        let frameIdx = -1;
+        for (let idx = Math.min(targetFrame, highestFrameReceived); idx > lastRenderedFrame; idx--) {
+          if (frameStore.has(idx)) {
+            frameIdx = idx;
+            break;
+          }
+        }
+
+        if (frameIdx >= 0) {
+          const frame = frameStore.get(frameIdx);
+          frameStore.delete(frameIdx);
+          drawFrameBitmap(frame.bitmap);
+          lastRenderedFrame = frameIdx;
+          lastVideoChunkId = frame.chunkId;
+          frameCounter++;
+          if (frameCounter === 1) frameT0 = performance.now();
+          const elapsed = Math.max(0.001, (performance.now() - frameT0) / 1000);
+          sFps.textContent = (frameCounter / elapsed).toFixed(1);
+
+          for (const oldIdx of Array.from(frameStore.keys())) {
+            if (oldIdx < lastRenderedFrame - 1) frameStore.delete(oldIdx);
+          }
+        }
+
+        sFrameBuf.textContent = String(frameStore.size);
+        if (sessionT0 > 0) sSession.textContent = ((performance.now() - sessionT0) / 1000).toFixed(1) + " s";
+        updateSyncIndicator();
+        frameLoopHandle = requestAnimationFrame(render);
+      };
+      frameLoopHandle = requestAnimationFrame(render);
+    }
+    function stopFrameLoop() {
+      if (frameLoopHandle) {
+        cancelAnimationFrame(frameLoopHandle);
+        frameLoopHandle = null;
+      }
+    }
+
+    function updateSyncIndicator() {
+      const drift = lastAudioChunkId - lastVideoChunkId;
+      const maxDrift = 5, norm = Math.max(-maxDrift, Math.min(maxDrift, drift));
+      const pct = 50 + (norm / maxDrift) * 50;
+      syncFill.style.width = `${pct}%`;
+      if (Math.abs(drift) <= 1) {
+        syncFill.style.background = "var(--ok)"; syncLabel.textContent = "In Sync"; syncLabel.style.color = "var(--ok)";
+      } else if (drift > 1) {
+        syncFill.style.background = "var(--warn)"; syncLabel.textContent = `Audio +${drift}`; syncLabel.style.color = "var(--warn)";
+      } else {
+        syncFill.style.background = "var(--warn)"; syncLabel.textContent = `Video +${Math.abs(drift)}`; syncLabel.style.color = "var(--warn)";
+      }
+      if (audioCtx && audioStarted) {
+        sAudioLead.textContent = `${Math.max(0, Math.round((playbackCursor - audioCtx.currentTime) * 1000))} ms`;
+      }
+    }
+
+    function formatGap(ms) {
+      const r = Math.round(ms);
+      return r > 0 ? `+${r} ms` : r < 0 ? `${r} ms` : "0 ms";
+    }
+    function gapClass(ms) { return ms > 0 ? "positive" : ms < 0 ? "negative" : "zero"; }
+
+    function updateSyncGaps(firstGap, lastGap) {
+      syncFirstGap.textContent = formatGap(firstGap);
+      syncFirstGap.className = `value ${gapClass(firstGap)}`;
+      syncLastGap.textContent = formatGap(lastGap);
+      syncLastGap.className = `value ${gapClass(lastGap)}`;
+    }
+
+    function updateMoshiText(text) {
+      if (!text || text === moshiTranscript) return;
+      moshiTranscript = text;
+      moshiText.innerHTML = text + '<span class="cursor"></span>';
+      moshiText.scrollTop = moshiText.scrollHeight;
+    }
+
+    // WebSocket
+    async function connectWs() {
+      if (ws && ws.readyState <= 1) return;
+      ws = new WebSocket(wsUrl());
+      ws.binaryType = "arraybuffer";
+      ws.onopen = () => {
+        setStatus("Connected. Starting...");
+        ws.send(JSON.stringify({ type: "start", sample_rate: audioCtx ? Math.round(audioCtx.sampleRate) : 48000 }));
+      };
+      ws.onmessage = async (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          await handleBinaryAv(new Uint8Array(event.data));
+          return;
+        }
+        if (typeof event.data !== "string") return;
+        let msg; try { msg = JSON.parse(event.data); } catch { return; }
+
+        if (msg.type === "server_ready") {
+          serverSR = Number(msg.sample_rate || 24000);
+          modelType = msg.model_type || "—";
+          tokensPerChunk = msg.tokens_per_chunk || 0;
+          bufferMs = Number(msg.buffer_ms || 1400);
+          targetFps = Number(msg.target_fps) || 25;
+          computeBufferTargets();
+          sModel.textContent = `${modelType} (${tokensPerChunk}t)`;
+          sBufferDelay.textContent = `${bufferMs} ms`;
+          setStatus(`Ready — ${modelType} model`);
+          overlayText.textContent = "LIVE"; liveDot.classList.add("active");
+          sessionT0 = performance.now();
+          buffering = true; bufferStartTime = performance.now();
+          bufferOverlay.classList.add("visible"); bufferLabel.textContent = `Buffering... ${bufferMs}ms`;
+          startFrameLoop();
+          return;
+        }
+        if (msg.type === "chunk_audio") {
+          scheduleAudio(msg.pcm_s16le_b64, Number(msg.sample_rate || serverSR));
+          lastAudioChunkId = msg.chunk_id;
+          sGenMs.textContent = `${Math.round(msg.gen_ms || 0)} ms`;
+          if (msg.avg_first_gap_ms !== undefined) {
+            updateSyncGaps(msg.avg_first_gap_ms, msg.avg_last_gap_ms);
+          }
+          return;
+        }
+        if (msg.type === "chunk_frame") {
+          const frameIdx = Math.max(0, Number(msg.chunk_id || 1) - 1);
+          highestFrameReceived = Math.max(highestFrameReceived, frameIdx);
+          if (!frameStore.has(frameIdx)) {
+            const bitmap = await decodeFrameBitmap(msg.jpeg_b64);
+            frameStore.set(frameIdx, { bitmap, chunkId: msg.chunk_id });
+          }
+          sServerFps.textContent = String(msg.server_fps || 0);
+          sChunks.textContent = String(msg.chunks_done || 0);
+          if (msg.avg_gen_ms) sAvgGenMs.textContent = `${Math.round(msg.avg_gen_ms)} ms`;
+          const txt = String(msg.moshi_text || "").trim();
+          if (txt.length) updateMoshiText(txt);
+          return;
+        }
+        if (msg.type === "av_frame") {
+          scheduleAudio(msg.pcm_s16le_b64, Number(msg.sample_rate || serverSR));
+          lastAudioChunkId = msg.chunk_id;
+          sGenMs.textContent = `${Math.round(msg.gen_ms || 0)} ms`;
+          const frameIdx = Math.max(0, Number(msg.chunk_id || 1) - 1);
+          highestFrameReceived = Math.max(highestFrameReceived, frameIdx);
+          if (!frameStore.has(frameIdx)) {
+            const bitmap = await decodeFrameBitmap(msg.jpeg_b64);
+            frameStore.set(frameIdx, { bitmap, chunkId: msg.chunk_id });
+          }
+          sServerFps.textContent = String(msg.server_fps || 0);
+          sChunks.textContent = String(msg.chunks_done || 0);
+          if (msg.avg_gen_ms) sAvgGenMs.textContent = `${Math.round(msg.avg_gen_ms)} ms`;
+          const txt = String(msg.moshi_text || "").trim();
+          if (txt.length) updateMoshiText(txt);
+          return;
+        }
+        if (msg.type === "error") setStatus(`Error: ${msg.message || "unknown"}`);
+      };
+      ws.onclose = () => { setStatus("Disconnected"); overlayText.textContent = "OFFLINE"; liveDot.classList.remove("active"); };
+      ws.onerror = () => setStatus("WebSocket error");
+    }
+
+    // Mic
+    function startMeter() {
+      if (!audioCtx || !analyser) return;
+      const data = new Uint8Array(analyser.fftSize);
+      if (meterTimer) clearInterval(meterTimer);
+      meterTimer = setInterval(() => {
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sum += v * v; }
+        meterFill.style.width = `${Math.min(100, Math.round(Math.sqrt(sum / data.length) * 800))}%`;
+      }, 60);
+    }
+
+    async function startConversation() {
+      if (mediaStream) return;
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false
+        });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === "suspended") await audioCtx.resume();
+        micSource = audioCtx.createMediaStreamSource(mediaStream);
+        analyser = audioCtx.createAnalyser(); analyser.fftSize = 1024;
+        scriptNode = audioCtx.createScriptProcessor(2048, 1, 1);
+        micSource.connect(analyser); analyser.connect(scriptNode); scriptNode.connect(audioCtx.destination);
+        scriptNode.onaudioprocess = (evt) => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          const input = evt.inputBuffer.getChannelData(0);
+          const pcm16 = new Int16Array(input.length);
+          for (let i = 0; i < input.length; i++) { const s = Math.max(-1, Math.min(1, input[i])); pcm16[i] = s < 0 ? s * 32768 : s * 32767; }
+          ws.send(pcm16.buffer);
+        };
+        await connectWs(); startMeter();
+        startBtn.disabled = true; stopBtn.disabled = false; setStatus("Streaming...");
+      } catch (err) { console.error(err); setStatus(`Failed: ${err.message || err}`); await stopConversation(); }
+    }
+
+    async function stopConversation() {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "stop" }));
+      if (ws) { ws.close(); ws = null; }
+      stopFrameLoop();
+      if (scriptNode) { scriptNode.disconnect(); scriptNode.onaudioprocess = null; scriptNode = null; }
+      if (analyser) { analyser.disconnect(); analyser = null; }
+      if (micSource) { micSource.disconnect(); micSource = null; }
+      if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+      if (audioCtx) { try { await audioCtx.close(); } catch {} audioCtx = null; }
+      if (meterTimer) { clearInterval(meterTimer); meterTimer = null; }
+      playbackCursor = 0; playbackStartTime = 0; audioStarted = false; frameStore = new Map();
+      frameCounter = 0; frameT0 = 0; sessionT0 = 0;
+      lastRenderedFrame = -1; highestFrameReceived = -1;
+      buffering = true; bufferStartTime = 0;
+      lastAudioChunkId = -1; lastVideoChunkId = -1; moshiTranscript = "";
+      meterFill.style.width = "0%"; overlayText.textContent = "OFFLINE"; liveDot.classList.remove("active");
+      bufferOverlay.classList.remove("visible"); moshiText.innerHTML = '—<span class="cursor"></span>';
+      videoCtx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+      sFps.textContent = "0.0"; sServerFps.textContent = "—";
+      sGenMs.textContent = "0 ms"; sAvgGenMs.textContent = "0 ms";
+      sChunks.textContent = "0"; sAudioLead.textContent = "0 ms";
+      sFrameBuf.textContent = "0"; sSession.textContent = "0.0 s";
+      sBufferDelay.textContent = "0 ms";
+      syncFill.style.width = "50%"; syncFill.style.background = "var(--ok)";
+      syncLabel.textContent = "In Sync"; syncLabel.style.color = "var(--ok)";
+      syncFirstGap.textContent = "0 ms"; syncFirstGap.className = "value zero";
+      syncLastGap.textContent = "0 ms"; syncLastGap.className = "value zero";
+      startBtn.disabled = false; stopBtn.disabled = true; setStatus("Stopped");
+    }
+
+    startBtn.addEventListener("click", startConversation);
+    stopBtn.addEventListener("click", () => stopConversation());
+    reconnectBtn.addEventListener("click", async () => { await stopConversation(); setTimeout(() => startConversation(), 500); });
+    window.addEventListener("beforeunload", () => stopConversation());
+  </script>
+</body>
+</html>
